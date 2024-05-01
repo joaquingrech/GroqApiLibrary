@@ -1,54 +1,62 @@
-﻿using Newtonsoft.Json.Linq;
-using System.Net.Http.Headers;
-using System.Text;
+﻿using System.Text;
+using System.Text.Json;
 
 namespace GroqApiLibrary;
 
 public class GroqApiClient : IGroqApiClient
 {
-    private readonly HttpClient client = new();
+    private readonly HttpClient httpClient = new();
 
     public GroqApiClient(string apiKey)
     {
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+		httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
     }
 
-    public async Task<JObject> CreateChatCompletionAsync(JObject request)
-    {
-        // Commented out until stabilized on Groq
-        // the API is still not accepting the request payload in its documented format, even after following the JSON mode instructions.
-        // request.Add("response_format", new JObject(new JProperty("type", "json_object")));
+	public async Task<JsonElement> CreateChatCompletionAsync(JsonElement request)
+	{
+		// Commented out until stabilized on Groq
+		// the API is still not accepting the request payload in its documented format, even after following the JSON mode instructions.
+		// var modifiedRequest = request.Clone();
+		// modifiedRequest.GetProperty("response_format").Add("type", JsonValue.Create("json_object"));
 
-        StringContent httpContent = new StringContent(request.ToString(), Encoding.UTF8, MediaTypeHeaderValue.Parse("application/json"));
-        HttpResponseMessage response = await client.PostAsync("https://api.groq.com/openai/v1/chat/completions", httpContent);
-        response.EnsureSuccessStatusCode();
-        string responseString = await response.Content.ReadAsStringAsync();
-        JObject responseJson = JObject.Parse(responseString);
-        return responseJson;
-    }
+		var jsonRequestString = JsonSerializer.Serialize(request);
+		using var httpContent = new StringContent(jsonRequestString, Encoding.UTF8, "application/json");
 
-    public async IAsyncEnumerable<JObject> CreateChatCompletionStreamAsync(JObject request)
-    {
-        request.Add("stream", true);
-        StringContent httpContent = new StringContent(request.ToString(), Encoding.UTF8, MediaTypeHeaderValue.Parse("application/json"));
+		HttpResponseMessage response = await httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", httpContent);
+		response.EnsureSuccessStatusCode();
+		string responseString = await response.Content.ReadAsStringAsync();
 
-        HttpResponseMessage response = await client.PostAsync("https://api.groq.com/openai/v1/chat/completions", httpContent);
-        response.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(responseString);
+		return doc.RootElement.Clone();
+	}
 
-        using var stream = await response.Content.ReadAsStreamAsync();
-        using var reader = new StreamReader(stream);
 
-        while (!reader.EndOfStream)
-        {
-            var line = await reader.ReadLineAsync();
-            if (line.StartsWith("data: "))
-            {
-                var data = line["data: ".Length..];
-                if (data != "[DONE]")
-                {
-                    yield return JObject.Parse(data);
-                }
-            }
-        }
-    }
+	public async IAsyncEnumerable<JsonElement> CreateChatCompletionStreamAsync(JsonElement request)
+	{
+		// Modify the request to add "stream: true" (assuming request is initially mutable or rebuilt as needed)
+		var requestObj = JsonSerializer.Deserialize<Dictionary<string, object>>(request.GetRawText());
+		requestObj["stream"] = true;
+		var jsonRequestString = JsonSerializer.Serialize(requestObj);
+
+		using var httpContent = new StringContent(jsonRequestString, Encoding.UTF8, "application/json");
+		HttpResponseMessage response = await httpClient.PostAsync("https://api.groq.com/openai/v1/chat/completions", httpContent);
+		response.EnsureSuccessStatusCode();
+
+		using var stream = await response.Content.ReadAsStreamAsync();
+		using var reader = new StreamReader(stream);
+
+		while (!reader.EndOfStream)
+		{
+			var line = await reader.ReadLineAsync();
+			if (line.StartsWith("data: "))
+			{
+				var data = line["data: ".Length..];
+				if (data != "[DONE]")
+				{
+					using var doc = JsonDocument.Parse(data);
+					yield return doc.RootElement.Clone();
+				}
+			}
+		}
+	}
 }

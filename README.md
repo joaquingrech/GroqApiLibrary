@@ -6,12 +6,7 @@ This library provides a simple interface to interact with the Groq AI API. It al
 
 ## Installation
 
-1. To use this library, you'll need to install the following NuGet packages:
-   - Newtonsoft.Json
-     ```
-     dotnet add package Newtonsoft.Json
-     ```
-2. Copy the GroqApiClient.cs file and the IGroqApiClient interface file into your project.
+1. Either reference the GroqApiLibrary in your project or copy the GroqApiClient.cs file and the IGroqApiClient interface file into your project.
 
 ## Usage
 
@@ -26,44 +21,53 @@ This library provides a simple interface to interact with the Groq AI API. It al
 
 ```csharp
 using GroqApiLibrary;
-using Newtonsoft.Json.Linq;
-using System;
-using System.Threading.Tasks;
+using System.Text.Json;
 
-class Program
+namespace GroqTest
 {
-    static async Task Main(string[] args)
-    {
-        string apiKey = "xxxxxxxxx";
-        IGroqApiClient groqApi = new GroqApiClient(apiKey);
+	internal class Program
+	{
+		static async Task Main(string[] args)
+		{
+			string apiKey = "xxxxxxxxx";
+			IGroqApiClient groqApi = new GroqApiClient(apiKey);
 
-        JObject request = new()
-        {
-            ["model"] = "mixtral-8x7b-32768", // llama2-70b-chat | gemma-7b-it | llama3-70b-8192| llama3-8b-8192 also supported
-            ["temperature"] = 0.5,
-            ["max_tokens"] = 100,
-            ["top_p"] = 1,
-            ["stop"] = "TERMINATE",
-            ["messages"] = new JArray
-            {
-                new JObject
-                {
-                    ["role"] = "system",
-                    ["content"] = "You are a chatbot capable of anything and everything."
-                },
-                new JObject
-                {
-                    ["role"] = "user",
-                    ["content"] = "Write a poem about GitHub."
-                }
-            }
-        };
+			// Building the request using a Dictionary and a List to handle JSON creation.
+			var requestObj = new Dictionary<string, object>
+			{
+				["model"] = "mixtral-8x7b-32768", // Supported models: llama2-70b-chat, gemma-7b-it, llama3-70b-8192, llama3-8b-8192
+				["temperature"] = 0.5,
+				["max_tokens"] = 100,
+				["top_p"] = 1,
+				["stop"] = "TERMINATE",
+				["messages"] = new List<Dictionary<string, object>>
+		{
+			new Dictionary<string, object>
+			{
+				["role"] = "system",
+				["content"] = "You are a chatbot capable of anything and everything."
+			},
+			new Dictionary<string, object>
+			{
+				["role"] = "user",
+				["content"] = "Write a poem about GitHub."
+			}
+		}
+			};
 
-        JObject result = await groqApi.CreateChatCompletionAsync(request);
-        string response = result["choices"]?[0]?["message"]?["content"]?.ToString() ?? "No response found";
-        Console.WriteLine(response);
-        Console.ReadLine();
-    }
+			string jsonRequest = JsonSerializer.Serialize(requestObj);
+			JsonElement request = JsonDocument.Parse(jsonRequest).RootElement;
+
+			JsonElement result = await groqApi.CreateChatCompletionAsync(request);
+			JsonElement choices = result.GetProperty("choices");
+			string response = choices.ValueKind != JsonValueKind.Undefined && choices.GetArrayLength() > 0 ?
+				choices[0].GetProperty("message").GetProperty("content").GetString() ?? "No response found" :
+				"No response found";
+
+			Console.WriteLine(response);
+			Console.ReadLine();
+		}
+	}
 }
 ```
 
@@ -71,7 +75,7 @@ class Program
 
 ```csharp
 using GroqApiLibrary;
-using Newtonsoft.Json.Linq;
+using System.Text.Json;
 
 class Program_streaming
 {
@@ -80,21 +84,22 @@ class Program_streaming
         string apiKey = "xxxxxxxxx";
         IGroqApiClient groqApi = new GroqApiClient(apiKey);
 
-        JObject request = new()
+        // Building the request using a Dictionary and a List to handle JSON creation.
+        var requestObj = new Dictionary<string, object>
         {
             ["model"] = "mixtral-8x7b-32768", // LLaMA2-70b-chat or Gemma-7b-it also supported
             ["temperature"] = 0.5,
             ["max_tokens"] = 100,
             ["top_p"] = 1,
             ["stop"] = "TERMINATE",
-            ["messages"] = new JArray
+            ["messages"] = new List<Dictionary<string, object>>
             {
-                new JObject
+                new Dictionary<string, object>
                 {
                     ["role"] = "system",
                     ["content"] = "You are a chatbot capable of anything and everything."
                 },
-                new JObject
+                new Dictionary<string, object>
                 {
                     ["role"] = "user",
                     ["content"] = "Write a poem about GitHub."
@@ -102,10 +107,19 @@ class Program_streaming
             }
         };
 
-        await foreach (var chunk in groqApi.CreateChatCompletionStreamAsync(request))
+        string jsonRequest = JsonSerializer.Serialize(requestObj);
+        JsonElement request = JsonDocument.Parse(jsonRequest).RootElement;
+
+        // The stream processing must handle JsonElement objects.
+        await foreach (JsonElement chunk in groqApi.CreateChatCompletionStreamAsync(request))
         {
-            string delta = chunk["choices"]?[0]?["delta"]?["content"]?.ToString() ?? string.Empty;
-            Console.Write(delta);
+            JsonElement choices = chunk.GetProperty("choices");
+            if (choices.ValueKind != JsonValueKind.Undefined && choices.GetArrayLength() > 0)
+            {
+                JsonElement delta = choices[0].GetProperty("delta");
+                string content = delta.GetProperty("content").GetString() ?? string.Empty;
+                Console.Write(content);
+            }
         }
 
         Console.WriteLine();
@@ -138,4 +152,4 @@ This library is licensed under the MIT License. See the LICENSE file for more in
 
 ## Special Thanks
 
-Marcus Cazzola, who did some of the heavy lifting.
+This project is a fork from https://github.com/jgravelle/GroqApiLibrary because I decided to remove all external dependencies. Thank you JGravelle for starting the project.
